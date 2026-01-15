@@ -20,8 +20,9 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
  * Cleanup Behavior:
  *
  * This uninstall script removes all coupon post meta entries created by this plugin.
- * Specifically, it deletes the '_bc_cm_composite_component_products' meta key from
- * all coupon posts in the database.
+ * Specifically, it deletes:
+ * - '_bc_cm_composite_component_products' - Composite component restrictions
+ * - '_bc_cm_kit_builder_rules' - Kit Builder property rules
  *
  * This cleanup is necessary because:
  * 1. The meta data serves no purpose without the plugin active
@@ -35,18 +36,23 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 
 global $wpdb;
 
-// Meta key used by this plugin for storing composite component restrictions.
-$meta_key = '_bc_cm_composite_component_products';
+// Meta keys used by this plugin.
+$meta_keys = array(
+	'_bc_cm_composite_component_products', // Composite component restrictions.
+	'_bc_cm_kit_builder_rules',            // Kit Builder property rules.
+);
 
-// Delete all post meta entries with our meta key.
+// Delete all post meta entries with our meta keys.
 // Using direct database query for efficiency when potentially dealing with many coupons.
 // This is the recommended approach in uninstall scripts per WordPress documentation.
-// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-$wpdb->delete(
-	$wpdb->postmeta,
-	array( 'meta_key' => $meta_key ),
-	array( '%s' )
-);
+foreach ( $meta_keys as $meta_key ) {
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	$wpdb->delete(
+		$wpdb->postmeta,
+		array( 'meta_key' => $meta_key ),
+		array( '%s' )
+	);
+}
 
 // Clear any cached data that might exist.
 wp_cache_flush();

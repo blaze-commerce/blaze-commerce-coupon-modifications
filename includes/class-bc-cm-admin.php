@@ -41,11 +41,69 @@ class BC_CM_Admin {
 	 * @since 1.0.0
 	 */
 	public function __construct() {
-		// Add custom field to Usage Restriction tab.
+		// Add custom fields to Usage Restriction tab.
 		add_action( 'woocommerce_coupon_options_usage_restriction', array( $this, 'add_composite_component_field' ), 10, 2 );
+		add_action( 'woocommerce_coupon_options_usage_restriction', array( $this, 'add_kit_builder_rules_field' ), 11, 2 );
 
 		// Save custom field data.
 		add_action( 'woocommerce_coupon_options_save', array( $this, 'save_composite_component_field' ), 10, 2 );
+		add_action( 'woocommerce_coupon_options_save', array( $this, 'save_kit_builder_rules_field' ), 10, 2 );
+
+		// Enqueue admin scripts.
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_scripts' ) );
+	}
+
+	/**
+	 * Enqueue admin scripts for the coupon edit page.
+	 *
+	 * @since 1.1.0
+	 * @param string $hook The current admin page hook.
+	 * @return void
+	 */
+	public function enqueue_admin_scripts( string $hook ): void {
+		global $post;
+
+		// Only load on coupon edit page.
+		if ( 'post.php' !== $hook && 'post-new.php' !== $hook ) {
+			return;
+		}
+
+		if ( ! $post || 'shop_coupon' !== $post->post_type ) {
+			return;
+		}
+
+		// Inline script for Kit Builder rules functionality.
+		wp_add_inline_script( 'jquery', $this->get_kit_builder_inline_script() );
+	}
+
+	/**
+	 * Get inline JavaScript for Kit Builder rules management.
+	 *
+	 * @since 1.1.0
+	 * @return string JavaScript code.
+	 */
+	private function get_kit_builder_inline_script(): string {
+		return "
+		jQuery(document).ready(function($) {
+			// Add new rule row.
+			$('#bc_cm_add_kit_builder_rule').on('click', function(e) {
+				e.preventDefault();
+				var index = $('.bc_cm_kit_builder_rule_row').length;
+				var newRow = '<div class=\"bc_cm_kit_builder_rule_row\" style=\"margin-bottom: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd;\">' +
+					'<input type=\"text\" name=\"bc_cm_kit_builder_rules[' + index + '][key]\" placeholder=\"Property Name (e.g., Armor Type)\" style=\"width: 45%; margin-right: 5px;\" />' +
+					'<input type=\"text\" name=\"bc_cm_kit_builder_rules[' + index + '][value]\" placeholder=\"Value (e.g., Hyperline|HG2)\" style=\"width: 45%; margin-right: 5px;\" />' +
+					'<button type=\"button\" class=\"button bc_cm_remove_rule\" style=\"color: #a00;\">&times;</button>' +
+				'</div>';
+				$('#bc_cm_kit_builder_rules_container').append(newRow);
+			});
+
+			// Remove rule row.
+			$(document).on('click', '.bc_cm_remove_rule', function(e) {
+				e.preventDefault();
+				$(this).closest('.bc_cm_kit_builder_rule_row').remove();
+			});
+		});
+		";
 	}
 
 	/**
@@ -56,8 +114,8 @@ class BC_CM_Admin {
 	 * composite components for the coupon to apply.
 	 *
 	 * @since 1.0.0
-	 * @param int      $coupon_id The coupon post ID.
-	 * @param WC_Coupon $coupon   The coupon object.
+	 * @param int       $coupon_id The coupon post ID.
+	 * @param WC_Coupon $coupon    The coupon object.
 	 * @return void
 	 */
 	public function add_composite_component_field( int $coupon_id, WC_Coupon $coupon ): void {
@@ -105,11 +163,92 @@ class BC_CM_Admin {
 				// Tooltip icon with help text.
 				echo wc_help_tip(
 					__(
-						'Select products that must be present as composite product components (not standalone) for this coupon to apply. The discount will be applied to the composite parent product. If any of these products are added to the cart as standalone items, the coupon will not apply to them.',
+						'Select products that must be present as composite product components (not standalone) for this coupon to apply. The discount will be applied to the component product. If any of these products are added to the cart as standalone items, the coupon will not apply to them.',
 						'bc_cm_'
 					)
 				);
 				?>
+			</p>
+			<p class="form-field bc_cm_composite_help_link" style="margin-left: 150px; margin-top: -5px;">
+				<a href="<?php echo esc_url( BC_CM_Documentation::get_documentation_url( 'composite-products' ) ); ?>" target="_blank" style="font-size: 12px; text-decoration: none;">
+					<span class="dashicons dashicons-editor-help" style="font-size: 14px; vertical-align: text-bottom;"></span>
+					<?php esc_html_e( 'How does this work?', 'bc_cm_' ); ?>
+				</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Add the Kit Builder rules field to the Usage Restriction tab.
+	 *
+	 * Allows admins to define property name/value rules that must match
+	 * for MyCustomizer/Kit Builder products.
+	 *
+	 * @since 1.1.0
+	 * @param int       $coupon_id The coupon post ID.
+	 * @param WC_Coupon $coupon    The coupon object.
+	 * @return void
+	 */
+	public function add_kit_builder_rules_field( int $coupon_id, WC_Coupon $coupon ): void {
+		// Get saved rules from coupon meta.
+		$saved_rules = get_post_meta( $coupon_id, BC_CM_KIT_BUILDER_META_KEY, true );
+
+		// Ensure it's an array.
+		if ( ! is_array( $saved_rules ) ) {
+			$saved_rules = array();
+		}
+		?>
+		<div class="options_group">
+			<p class="form-field">
+				<label><?php esc_html_e( 'Kit Builder property rules', 'bc_cm_' ); ?></label>
+				<span class="description" style="display: block; margin-bottom: 10px;">
+					<?php esc_html_e( 'Define property rules for Kit Builder / MyCustomizer products. All rules must match (AND logic). Use | to specify multiple values (OR logic within a rule).', 'bc_cm_' ); ?>
+				</span>
+			</p>
+
+			<div id="bc_cm_kit_builder_rules_container" style="margin-left: 150px; margin-bottom: 15px;">
+				<?php if ( ! empty( $saved_rules ) ) : ?>
+					<?php foreach ( $saved_rules as $index => $rule ) : ?>
+						<div class="bc_cm_kit_builder_rule_row" style="margin-bottom: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd;">
+							<input
+								type="text"
+								name="bc_cm_kit_builder_rules[<?php echo esc_attr( $index ); ?>][key]"
+								value="<?php echo esc_attr( $rule['key'] ?? '' ); ?>"
+								placeholder="<?php esc_attr_e( 'Property Name (e.g., Armor Type)', 'bc_cm_' ); ?>"
+								style="width: 45%; margin-right: 5px;"
+							/>
+							<input
+								type="text"
+								name="bc_cm_kit_builder_rules[<?php echo esc_attr( $index ); ?>][value]"
+								value="<?php echo esc_attr( $rule['value'] ?? '' ); ?>"
+								placeholder="<?php esc_attr_e( 'Value (e.g., Hyperline|HG2)', 'bc_cm_' ); ?>"
+								style="width: 45%; margin-right: 5px;"
+							/>
+							<button type="button" class="button bc_cm_remove_rule" style="color: #a00;">&times;</button>
+						</div>
+					<?php endforeach; ?>
+				<?php endif; ?>
+			</div>
+
+			<p class="form-field" style="margin-left: 150px;">
+				<button type="button" id="bc_cm_add_kit_builder_rule" class="button">
+					<?php esc_html_e( '+ Add Rule', 'bc_cm_' ); ?>
+				</button>
+				<?php
+				echo wc_help_tip(
+					__(
+						'Add property rules that must match for Kit Builder / MyCustomizer products. For example, add "Armor Type" as Property Name and "Hyperline" as Property Value. Use | to allow multiple values (e.g., "Hyperline|HG2" matches either). All rules must match (AND logic), but multiple values within a rule use OR logic.',
+						'bc_cm_'
+					)
+				);
+				?>
+			</p>
+			<p class="form-field bc_cm_kit_builder_help_link" style="margin-left: 150px; margin-top: 5px;">
+				<a href="<?php echo esc_url( BC_CM_Documentation::get_documentation_url( 'kit-builder' ) ); ?>" target="_blank" style="font-size: 12px; text-decoration: none;">
+					<span class="dashicons dashicons-editor-help" style="font-size: 14px; vertical-align: text-bottom;"></span>
+					<?php esc_html_e( 'How does this work?', 'bc_cm_' ); ?>
+				</a>
 			</p>
 		</div>
 		<?php
@@ -122,8 +261,8 @@ class BC_CM_Admin {
 	 * before saving to post meta.
 	 *
 	 * @since 1.0.0
-	 * @param int      $coupon_id The coupon post ID.
-	 * @param WC_Coupon $coupon   The coupon object.
+	 * @param int       $coupon_id The coupon post ID.
+	 * @param WC_Coupon $coupon    The coupon object.
 	 * @return void
 	 */
 	public function save_composite_component_field( int $coupon_id, WC_Coupon $coupon ): void {
@@ -161,6 +300,62 @@ class BC_CM_Admin {
 			delete_post_meta( $coupon_id, BC_CM_META_KEY );
 		} else {
 			update_post_meta( $coupon_id, BC_CM_META_KEY, $sanitized_ids );
+		}
+	}
+
+	/**
+	 * Save the Kit Builder rules field data.
+	 *
+	 * Performs security checks (nonce, capability) and sanitizes input
+	 * before saving to post meta.
+	 *
+	 * @since 1.1.0
+	 * @param int       $coupon_id The coupon post ID.
+	 * @param WC_Coupon $coupon    The coupon object.
+	 * @return void
+	 */
+	public function save_kit_builder_rules_field( int $coupon_id, WC_Coupon $coupon ): void {
+		// Security: Verify nonce to prevent CSRF attacks.
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+		if ( ! isset( $_POST[ self::NONCE_NAME ] ) || ! wp_verify_nonce( wp_unslash( $_POST[ self::NONCE_NAME ] ), self::NONCE_ACTION ) ) {
+			return;
+		}
+
+		// Security: Verify user has permission to edit coupons.
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		// Get and sanitize the submitted rules.
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+		$rules = isset( $_POST['bc_cm_kit_builder_rules'] )
+			? wp_unslash( $_POST['bc_cm_kit_builder_rules'] )
+			: array();
+
+		$sanitized_rules = array();
+
+		if ( is_array( $rules ) ) {
+			foreach ( $rules as $rule ) {
+				// Sanitize key and value as text fields.
+				$key   = isset( $rule['key'] ) ? sanitize_text_field( $rule['key'] ) : '';
+				$value = isset( $rule['value'] ) ? sanitize_text_field( $rule['value'] ) : '';
+
+				// Only save rules that have both key and value.
+				if ( ! empty( $key ) && ! empty( $value ) ) {
+					$sanitized_rules[] = array(
+						'key'   => $key,
+						'value' => $value,
+					);
+				}
+			}
+		}
+
+		// Save to post meta.
+		// If empty array, delete the meta to keep database clean.
+		if ( empty( $sanitized_rules ) ) {
+			delete_post_meta( $coupon_id, BC_CM_KIT_BUILDER_META_KEY );
+		} else {
+			update_post_meta( $coupon_id, BC_CM_KIT_BUILDER_META_KEY, $sanitized_rules );
 		}
 	}
 }

@@ -3,7 +3,7 @@
  * Plugin Name: Blaze Commerce Coupon Modifications
  * Plugin URI: https://blazecommerce.io
  * Description: Extends WooCommerce coupons to add restrictions based on composite product component selections.
- * Version: 1.0.0
+ * Version: 1.3.8
  * Author: Blaze Commerce
  * Author URI: https://blazecommerce.io
  * License: GPL-2.0+
@@ -26,7 +26,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin version constant.
  */
-define( 'BC_CM_VERSION', '1.0.0' );
+define( 'BC_CM_VERSION', '1.3.8' );
 
 /**
  * Plugin directory path constant.
@@ -43,6 +43,12 @@ define( 'BC_CM_PLUGIN_FILE', __FILE__ );
  * Prefixed with underscore to hide from custom fields UI.
  */
 define( 'BC_CM_META_KEY', '_bc_cm_composite_component_products' );
+
+/**
+ * Meta key for storing Kit Builder / MyCustomizer property rules.
+ * Prefixed with underscore to hide from custom fields UI.
+ */
+define( 'BC_CM_KIT_BUILDER_META_KEY', '_bc_cm_kit_builder_rules' );
 
 /**
  * Main plugin class using singleton pattern.
@@ -75,6 +81,13 @@ final class BC_CM_Plugin {
 	public $validator = null;
 
 	/**
+	 * Documentation class instance.
+	 *
+	 * @var BC_CM_Documentation|null
+	 */
+	public $documentation = null;
+
+	/**
 	 * Get singleton instance.
 	 *
 	 * @since 1.0.0
@@ -98,6 +111,32 @@ final class BC_CM_Plugin {
 
 		// Register uninstall hook for cleanup.
 		register_uninstall_hook( __FILE__, array( 'BC_CM_Plugin', 'uninstall' ) );
+
+		// Add Documentation link to plugin action links on plugins page.
+		add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $this, 'add_plugin_action_links' ) );
+	}
+
+	/**
+	 * Add custom action links to the plugin listing on the plugins page.
+	 *
+	 * Adds a "Documentation" link next to "Deactivate" on wp-admin/plugins.php.
+	 *
+	 * @since 1.3.0
+	 * @param array $links Existing plugin action links.
+	 * @return array Modified plugin action links.
+	 */
+	public function add_plugin_action_links( array $links ): array {
+		$documentation_url = admin_url( 'admin.php?page=bc-cm-documentation' );
+		$documentation_link = sprintf(
+			'<a href="%s">%s</a>',
+			esc_url( $documentation_url ),
+			esc_html__( 'Documentation', 'bc_cm_' )
+		);
+
+		// Add Documentation link after existing links.
+		$links['documentation'] = $documentation_link;
+
+		return $links;
 	}
 
 	/**
@@ -125,8 +164,8 @@ final class BC_CM_Plugin {
 	/**
 	 * Check if required plugins are active.
 	 *
-	 * Verifies WooCommerce and WooCommerce Composite Products are active.
-	 * Displays admin notice if dependencies are missing.
+	 * Verifies WooCommerce is active. WooCommerce Composite Products and
+	 * MyCustomizer are optional - features will be enabled based on availability.
 	 *
 	 * @since 1.0.0
 	 * @return bool True if all dependencies met, false otherwise.
@@ -134,16 +173,13 @@ final class BC_CM_Plugin {
 	private function check_dependencies(): bool {
 		$missing = array();
 
-		// Check for WooCommerce.
+		// Check for WooCommerce (required).
 		if ( ! class_exists( 'WooCommerce' ) ) {
 			$missing[] = 'WooCommerce';
 		}
 
-		// Check for WooCommerce Composite Products.
-		// The plugin defines this class for composite product handling.
-		if ( ! class_exists( 'WC_Product_Composite' ) && ! function_exists( 'wc_cp_is_composited_cart_item' ) ) {
-			$missing[] = 'WooCommerce Composite Products';
-		}
+		// Note: WooCommerce Composite Products and MyCustomizer are optional.
+		// Features will be enabled/disabled based on their availability.
 
 		if ( ! empty( $missing ) ) {
 			add_action( 'admin_notices', function() use ( $missing ) {
@@ -205,6 +241,7 @@ final class BC_CM_Plugin {
 	 * @return void
 	 */
 	private function includes(): void {
+		require_once BC_CM_PLUGIN_DIR . 'includes/class-bc-cm-documentation.php';
 		require_once BC_CM_PLUGIN_DIR . 'includes/class-bc-cm-admin.php';
 		require_once BC_CM_PLUGIN_DIR . 'includes/class-bc-cm-coupon-validator.php';
 	}
@@ -216,6 +253,9 @@ final class BC_CM_Plugin {
 	 * @return void
 	 */
 	private function init_classes(): void {
+		// Documentation class handles admin documentation page.
+		$this->documentation = new BC_CM_Documentation();
+
 		// Admin class handles coupon edit screen fields.
 		$this->admin = new BC_CM_Admin();
 
@@ -235,12 +275,20 @@ final class BC_CM_Plugin {
 	public static function uninstall(): void {
 		global $wpdb;
 
-		// Delete all coupon meta with our key.
+		// Delete all coupon meta with our keys.
 		// Using direct query for efficiency when dealing with potentially many coupons.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$wpdb->delete(
 			$wpdb->postmeta,
 			array( 'meta_key' => BC_CM_META_KEY ),
+			array( '%s' )
+		);
+
+		// Delete Kit Builder rules meta.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->delete(
+			$wpdb->postmeta,
+			array( 'meta_key' => BC_CM_KIT_BUILDER_META_KEY ),
 			array( '%s' )
 		);
 	}
